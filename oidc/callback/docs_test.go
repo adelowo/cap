@@ -45,42 +45,31 @@ func Example() {
 		// handle error
 	}
 
-	// Create an authorization code flow callback
-	// A function to handle successful attempts.
-	successFn := func(
-		stateID string,
-		t oidc.Token,
-		w http.ResponseWriter,
-		req *http.Request,
-	) {
-		w.WriteHeader(http.StatusOK)
-		printableToken := fmt.Sprintf("id_token: %s", string(t.IDToken()))
-		_, _ = w.Write([]byte(printableToken))
-	}
-	// A function to handle errors and failed attempts.
-	errorFn := func(
-		stateID string,
-		r *AuthenErrorResponse,
-		e error,
-		w http.ResponseWriter,
-		req *http.Request,
-	) {
-		if e != nil {
+	after := func(w http.ResponseWriter, req *http.Request) {
+		t, found := Token(req.Context())
+		if found {
+			w.WriteHeader(http.StatusOK)
+			printableToken := fmt.Sprintf("id_token: %s", string(t.IDToken()))
+			_, _ = w.Write([]byte(printableToken))
+			return
+		}
+		if e, found := Error(req.Context()); found {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte(e.Error()))
 			return
 		}
 		w.WriteHeader(http.StatusUnauthorized)
 	}
+
 	// create the authorization code callback and register it for use.
-	authCodeCallback, err := AuthCode(context.Background(), p, &SingleStateReader{State: authCodeAttempt}, successFn, errorFn)
+	authCodeCallback, err := AuthCode(context.Background(), p, &SingleStateReader{State: authCodeAttempt}, after)
 	if err != nil {
 		// handle error
 	}
 	http.HandleFunc("/auth-code-callback", authCodeCallback)
 
 	// create an implicit flow callback and register it for use.
-	implicitCallback, err := Implicit(context.Background(), p, &SingleStateReader{State: implicitAttempt}, successFn, errorFn)
+	implicitCallback, err := Implicit(context.Background(), p, &SingleStateReader{State: implicitAttempt}, testAfterCallbackHandler)
 	if err != nil {
 		// handle error
 	}
@@ -116,35 +105,24 @@ func ExampleAuthCode() {
 		// handle error
 	}
 
-	// Create an authorization code flow callback
-	// A function to handle successful attempts.
-	successFn := func(
-		stateID string,
-		t oidc.Token,
-		w http.ResponseWriter,
-		req *http.Request,
-	) {
-		w.WriteHeader(http.StatusOK)
-		printableToken := fmt.Sprintf("id_token: %s", string(t.IDToken()))
-		_, _ = w.Write([]byte(printableToken))
-	}
-	// A function to handle errors and failed attempts.
-	errorFn := func(
-		stateID string,
-		r *AuthenErrorResponse,
-		e error,
-		w http.ResponseWriter,
-		req *http.Request,
-	) {
-		if e != nil {
+	after := func(w http.ResponseWriter, req *http.Request) {
+		t, found := Token(req.Context())
+		if found {
+			w.WriteHeader(http.StatusOK)
+			printableToken := fmt.Sprintf("id_token: %s", string(t.IDToken()))
+			_, _ = w.Write([]byte(printableToken))
+			return
+		}
+		if e, found := Error(req.Context()); found {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte(e.Error()))
 			return
 		}
 		w.WriteHeader(http.StatusUnauthorized)
 	}
+
 	// create the authorization code callback and register it for use.
-	authCodeCallback, err := AuthCode(context.Background(), p, &SingleStateReader{State: authCodeAttempt}, successFn, errorFn)
+	authCodeCallback, err := AuthCode(context.Background(), p, &SingleStateReader{State: authCodeAttempt}, after)
 	if err != nil {
 		// handle error
 	}
@@ -179,27 +157,15 @@ func ExampleImplicit() {
 		// handle error
 	}
 
-	// Create an authorization code flow callback
-	// A function to handle successful attempts.
-	successFn := func(
-		stateID string,
-		t oidc.Token,
-		w http.ResponseWriter,
-		req *http.Request,
-	) {
-		w.WriteHeader(http.StatusOK)
-		printableToken := fmt.Sprintf("id_token: %s", string(t.IDToken()))
-		_, _ = w.Write([]byte(printableToken))
-	}
-	// A function to handle errors and failed attempts.
-	errorFn := func(
-		stateID string,
-		r *AuthenErrorResponse,
-		e error,
-		w http.ResponseWriter,
-		req *http.Request,
-	) {
-		if e != nil {
+	after := func(w http.ResponseWriter, req *http.Request) {
+		t, found := Token(req.Context())
+		if found {
+			w.WriteHeader(http.StatusOK)
+			printableToken := fmt.Sprintf("id_token: %s", string(t.IDToken()))
+			_, _ = w.Write([]byte(printableToken))
+			return
+		}
+		if e, found := Error(req.Context()); found {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte(e.Error()))
 			return
@@ -208,7 +174,7 @@ func ExampleImplicit() {
 	}
 
 	// create an implicit flow callback and register it for use.
-	implicitCallback, err := Implicit(context.Background(), p, &SingleStateReader{State: implicitAttempt}, successFn, errorFn)
+	implicitCallback, err := Implicit(context.Background(), p, &SingleStateReader{State: implicitAttempt}, after)
 	if err != nil {
 		// handle error
 	}

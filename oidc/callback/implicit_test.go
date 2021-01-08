@@ -36,21 +36,19 @@ func TestImplicit(t *testing.T) {
 		name      string
 		p         *oidc.Provider
 		rw        StateReader
-		sFn       SuccessResponseFunc
-		eFn       ErrorResponseFunc
+		after     http.HandlerFunc
 		wantErr   bool
 		wantIsErr error
 	}{
-		{"valid", p, rw, testSuccessFn, testFailFn, false, nil},
-		{"nil-p", nil, rw, testSuccessFn, testFailFn, true, oidc.ErrInvalidParameter},
-		{"nil-rw", p, nil, testSuccessFn, testFailFn, true, oidc.ErrInvalidParameter},
-		{"nil-sFn", p, rw, nil, testFailFn, true, oidc.ErrInvalidParameter},
-		{"nil-eFn", p, rw, testSuccessFn, nil, true, oidc.ErrInvalidParameter},
+		{"valid", p, rw, testAfterCallbackHandler, false, nil},
+		{"nil-p", nil, rw, testAfterCallbackHandler, true, oidc.ErrInvalidParameter},
+		{"nil-rw", p, nil, testAfterCallbackHandler, true, oidc.ErrInvalidParameter},
+		{"nil-after", p, rw, nil, true, oidc.ErrInvalidParameter},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert, require := assert.New(t), require.New(t)
-			got, err := Implicit(ctx, tt.p, tt.rw, tt.sFn, tt.eFn)
+			got, err := Implicit(ctx, tt.p, tt.rw, tt.after)
 			if tt.wantErr {
 				require.Error(err)
 				return
@@ -138,7 +136,7 @@ func Test_ImplicitResponses(t *testing.T) {
 			default:
 				reader = &SingleStateReader{state}
 			}
-			callbackSrv.Config.Handler, err = Implicit(ctx, p, reader, testSuccessFn, testFailFn)
+			callbackSrv.Config.Handler, err = Implicit(ctx, p, reader, testAfterCallbackHandler)
 			require.NoError(err)
 
 			authURL, err := p.AuthURL(ctx, state)
@@ -173,7 +171,7 @@ func Test_ImplicitResponses(t *testing.T) {
 		require.NoError(err)
 		tp.SetExpectedAuthNonce(state.Nonce())
 		reader := &SingleStateReader{state}
-		callbackSrv.Config.Handler, err = Implicit(ctx, p, reader, testSuccessFn, testFailFn)
+		callbackSrv.Config.Handler, err = Implicit(ctx, p, reader, testAfterCallbackHandler)
 		require.NoError(err)
 
 		tp.SetDisableImplicit(true)
@@ -209,7 +207,7 @@ func Test_ImplicitResponses(t *testing.T) {
 		require.NoError(err)
 		tp.SetExpectedAuthNonce(state.Nonce())
 		reader := &SingleStateReader{state}
-		callbackSrv.Config.Handler, err = Implicit(ctx, p, reader, testSuccessFn, testFailFn)
+		callbackSrv.Config.Handler, err = Implicit(ctx, p, reader, testAfterCallbackHandler)
 		require.NoError(err)
 
 		authURL, err := p.AuthURL(ctx, state)
@@ -236,7 +234,7 @@ func Test_ImplicitResponses(t *testing.T) {
 		state, err := oidc.NewState(1*time.Minute, redirect)
 		require.NoError(err)
 		reader := &SingleStateReader{state}
-		handler, err := Implicit(ctx, p, reader, testSuccessFn, testFailFn)
+		handler, err := Implicit(ctx, p, reader, testAfterCallbackHandler)
 		require.NoError(err)
 
 		reqForm := url.Values{}

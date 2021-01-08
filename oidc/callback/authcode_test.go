@@ -26,21 +26,19 @@ func TestAuthCode(t *testing.T) {
 		name      string
 		p         *oidc.Provider
 		rw        StateReader
-		sFn       SuccessResponseFunc
-		eFn       ErrorResponseFunc
+		after     http.HandlerFunc
 		wantErr   bool
 		wantIsErr error
 	}{
-		{"valid", p, rw, testSuccessFn, testFailFn, false, nil},
-		{"nil-p", nil, rw, testSuccessFn, testFailFn, true, oidc.ErrInvalidParameter},
-		{"nil-rw", p, nil, testSuccessFn, testFailFn, true, oidc.ErrInvalidParameter},
-		{"nil-sFn", p, rw, nil, testFailFn, true, oidc.ErrInvalidParameter},
-		{"nil-eFn", p, rw, testSuccessFn, nil, true, oidc.ErrInvalidParameter},
+		{"valid", p, rw, testAfterCallbackHandler, false, nil},
+		{"nil-p", nil, rw, testAfterCallbackHandler, true, oidc.ErrInvalidParameter},
+		{"nil-rw", p, nil, testAfterCallbackHandler, true, oidc.ErrInvalidParameter},
+		{"nil-after", p, rw, nil, true, oidc.ErrInvalidParameter},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert, require := assert.New(t), require.New(t)
-			got, err := AuthCode(ctx, tt.p, tt.rw, tt.sFn, tt.eFn)
+			got, err := AuthCode(ctx, tt.p, tt.rw, tt.after)
 			if tt.wantErr {
 				require.Error(err)
 				return
@@ -155,7 +153,7 @@ func Test_AuthCodeResponses(t *testing.T) {
 			default:
 				reader = &SingleStateReader{state}
 			}
-			callbackSrv.Config.Handler, err = AuthCode(ctx, p, reader, testSuccessFn, testFailFn)
+			callbackSrv.Config.Handler, err = AuthCode(ctx, p, reader, testAfterCallbackHandler)
 			require.NoError(err)
 
 			authURL, err := p.AuthURL(ctx, state)

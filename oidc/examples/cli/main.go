@@ -130,18 +130,17 @@ func main() {
 		return
 	}
 
-	successFn, successCh := success()
-	errorFn, failedCh := failed()
+	afterHandler, successCh, failedCh := afterCallbackHandler()
 
 	var handler http.HandlerFunc
 	if *useImplicit {
-		handler, err = callback.Implicit(ctx, p, &callback.SingleStateReader{State: s}, successFn, errorFn)
+		handler, err = callback.Implicit(ctx, p, &callback.SingleStateReader{State: s}, afterHandler)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error creating callback handler: %s", err)
 			return
 		}
 	} else {
-		handler, err = callback.AuthCode(ctx, p, &callback.SingleStateReader{State: s}, successFn, errorFn)
+		handler, err = callback.AuthCode(ctx, p, &callback.SingleStateReader{State: s}, afterHandler)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error creating auth code handler: %s", err)
 			return
@@ -214,50 +213,50 @@ type successResp struct {
 	Error error      // Error is populated when there's an error during the callback
 }
 
-func success() (callback.SuccessResponseFunc, <-chan successResp) {
-	const op = "success"
-	doneCh := make(chan successResp)
-	return func(stateID string, t oidc.Token, w http.ResponseWriter, req *http.Request) {
+// afterCallback creates an http.HandlerFunc that is called after the OIDC
+// callback.  It also creates channels for successful responses and errors
+func afterCallbackHandler() (http.HandlerFunc, <-chan successResp, <-chan error) {
+	const op = "handler"
+	successCh := make(chan successResp)
+	errorCh := make(chan error)
+	return func(w http.ResponseWriter, req *http.Request) {
 		var responseErr error
-		defer func() {
-			doneCh <- successResp{t, responseErr}
-			close(doneCh)
-		}()
-		w.WriteHeader(http.StatusOK)
-		if _, err := w.Write([]byte(successHTML)); err != nil {
-			responseErr = fmt.Errorf("%s: %w", op, err)
-			fmt.Fprintf(os.Stderr, "error writing successful response: %s", err)
-		}
-	}, doneCh
-}
 
-func failed() (callback.ErrorResponseFunc, <-chan error) {
-	const op = "failed"
-	doneCh := make(chan error)
-	return func(stateID string, r *callback.AuthenErrorResponse, e error, w http.ResponseWriter, req *http.Request) {
-		var responseErr error
+		t, found := callback.Token(req.Context())
+		if found {
+			defer func() {
+				successCh <- successResp{t, responseErr}
+				close(successCh)
+			}()
+			w.WriteHeader(http.StatusOK)
+			if _, err := w.Write([]byte(successHTML)); err != nil {
+				responseErr = fmt.Errorf("%s: %w", op, err)
+				fmt.Fprintf(os.Stderr, "error writing successful response: %s", responseErr)
+			}
+			return
+		}
+
 		defer func() {
 			if _, err := w.Write([]byte(responseErr.Error())); err != nil {
 				fmt.Fprintf(os.Stderr, "%s: error writing failed response: %s", op, err)
 			}
-			doneCh <- responseErr
-			close(doneCh)
+			errorCh <- responseErr
+			close(errorCh)
 		}()
-
-		if e != nil {
+		if e, found := callback.Error(req.Context()); found {
 			fmt.Fprintf(os.Stderr, "%s: callback error: %s", op, e.Error())
 			responseErr = e
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		if r != nil {
+		if r, found := callback.ErrorResponse(req.Context()); found {
 			responseErr = fmt.Errorf("%s: callback error from oidc provider: %s", op, r)
 			fmt.Fprint(os.Stderr, responseErr.Error())
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 		responseErr = fmt.Errorf("%s: unknown error from callback", op)
-	}, doneCh
+	}, successCh, errorCh
 }
 
 // openURL opens the specified URL in the default browser of the user.

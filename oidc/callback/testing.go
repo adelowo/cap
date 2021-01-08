@@ -10,15 +10,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// testSuccessFn is a test SuccessResponseFunc
-func testSuccessFn(stateID string, t oidc.Token, w http.ResponseWriter, req *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("login successful"))
-}
-
-// testFailFn is a test ErrorResponseFunc
-func testFailFn(stateID string, r *AuthenErrorResponse, e error, w http.ResponseWriter, req *http.Request) {
-	if e != nil {
+func testAfterCallbackHandler(w http.ResponseWriter, req *http.Request) {
+	_, found := Token(req.Context())
+	if found {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("login successful"))
+		return
+	}
+	if e, found := Error(req.Context()); found {
 		w.WriteHeader(http.StatusInternalServerError)
 		j, _ := json.Marshal(&AuthenErrorResponse{
 			Error:       "internal-callback-error",
@@ -27,7 +26,7 @@ func testFailFn(stateID string, r *AuthenErrorResponse, e error, w http.Response
 		_, _ = w.Write(j)
 		return
 	}
-	if r != nil {
+	if r, found := ErrorResponse(req.Context()); found {
 		w.WriteHeader(http.StatusUnauthorized)
 		j, _ := json.Marshal(r)
 		_, _ = w.Write(j)
