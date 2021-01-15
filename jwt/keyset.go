@@ -9,7 +9,11 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
+	"io/ioutil"
+	"mime"
 	"net/http"
+	"strings"
 
 	"github.com/coreos/go-oidc"
 	"github.com/hashicorp/go-cleanhttp"
@@ -23,11 +27,6 @@ type KeySet interface {
 
 	// VerifySignature parses the given JWT, verifies its signature, and returns the claims in its payload.
 	VerifySignature(ctx context.Context, token string) (claims map[string]interface{}, err error)
-}
-
-// OIDCDiscoveryKeySet verifies JWT signatures using keys obtained by the OIDC discovery mechanism.
-type OIDCDiscoveryKeySet struct {
-	provider *oidc.Provider
 }
 
 // JSONWebKeySet verifies JWT signatures using keys obtained from a JWKS URL.
@@ -54,38 +53,66 @@ func NewOIDCDiscoveryKeySet(ctx context.Context, discoveryURL string, discoveryC
 		return nil, err
 	}
 
-	provider, err := oidc.NewProvider(caCtx, discoveryURL)
+	type providerJSON struct {
+		Issuer  string `json:"issuer"`
+		JWKSURL string `json:"jwks_uri"`
+	}
+
+	wellKnown := strings.TrimSuffix(discoveryURL, "/") + "/.well-known/openid-configuration"
+	req, err := http.NewRequest("GET", wellKnown, nil)
 	if err != nil {
 		return nil, err
 	}
+	resp, err := doRequest(caCtx, req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
 
-	return &OIDCDiscoveryKeySet{
-		provider: provider,
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("unable to read response body: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s: %s", resp.Status, body)
+	}
+
+	var p providerJSON
+	err = unmarshalResp(resp, body, &p)
+	if err != nil {
+		return nil, fmt.Errorf("oidc: failed to decode provider discovery object: %v", err)
+	}
+
+	if p.Issuer != discoveryURL {
+		return nil, fmt.Errorf("oidc: issuer did not match the issuer returned by provider, expected %q got %q", discoveryURL, p.Issuer)
+	}
+
+	return JSONWebKeySet{
+		remoteJWKS: oidc.NewRemoteKeySet(caCtx, p.JWKSURL),
 	}, nil
+
 }
 
-// VerifySignature parses the given JWT, verifies its signature using discovered JWKS keys, and
-// returns the claims in its payload. The given JWT must be of the JWS compact serialization form.
-func (ks OIDCDiscoveryKeySet) VerifySignature(ctx context.Context, token string) (map[string]interface{}, error) {
-	// Verify only the signature
-	oidcConfig := &oidc.Config{
-		SkipClientIDCheck: true,
-		SkipExpiryCheck:   true,
-		SkipIssuerCheck:   true,
+func doRequest(ctx context.Context, req *http.Request) (*http.Response, error) {
+	client := http.DefaultClient
+	if c, ok := ctx.Value(oauth2.HTTPClient).(*http.Client); ok {
+		client = c
 	}
+	return client.Do(req.WithContext(ctx))
+}
 
-	verifier := ks.provider.Verifier(oidcConfig)
-	idToken, err := verifier.Verify(ctx, token)
-	if err != nil {
-		return nil, err
+func unmarshalResp(r *http.Response, body []byte, v interface{}) error {
+	err := json.Unmarshal(body, &v)
+	if err == nil {
+		return nil
 	}
-
-	allClaims := make(map[string]interface{})
-	if err := idToken.Claims(&allClaims); err != nil {
-		return nil, err
+	ct := r.Header.Get("Content-Type")
+	mediaType, _, parseErr := mime.ParseMediaType(ct)
+	if parseErr == nil && mediaType == "application/json" {
+		return fmt.Errorf("got Content-Type = application/json, but could not unmarshal as JSON: %v", err)
 	}
-
-	return allClaims, nil
+	return fmt.Errorf("expected Content-Type = application/json, got %q: %v", ct, err)
 }
 
 // NewJSONWebKeySet returns a KeySet that verifies JWT signatures using keys from the JSON Web
